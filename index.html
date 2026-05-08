@@ -69,7 +69,6 @@ body.is-recording .recording-warning{display:flex}
 <div class="toast-box" id="toastBox"></div>
 <div id="mainApp"></div>
 
-<!-- Create Post Modal -->
 <div class="modal-ov" id="cmpModal">
 <div class="modal-box" style="padding:24px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="font-size:20px;font-weight:700">Create Post</h2><button onclick="closeModal()" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer"><i class="fas fa-xmark"></i></button></div>
@@ -78,7 +77,6 @@ body.is-recording .recording-warning{display:flex}
 </div>
 </div>
 
-<!-- Create Group Modal -->
 <div class="modal-ov" id="grpModal">
 <div class="modal-box" style="padding:24px">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="font-size:20px;font-weight:700">Create Group</h2><button onclick="document.getElementById('grpModal').classList.remove('show')" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer"><i class="fas fa-xmark"></i></button></div>
@@ -89,7 +87,6 @@ body.is-recording .recording-warning{display:flex}
 </div>
 </div>
 
-<!-- Call UI -->
 <div class="call-overlay" id="callUI">
 <img id="callAvatar" src="" style="width:120px;height:120px;border-radius:50%;object-fit:cover;border:3px solid #38bdf8;box-shadow:0 0 40px rgba(56,189,248,0.3)" class="pulse-anim" onerror="this.src='https://picsum.photos/seed/call/100/100.jpg'">
 <h2 id="callName" style="font-size:28px;font-weight:700">User</h2>
@@ -107,6 +104,14 @@ try{sb=window.supabase.createClient(SB_URL,SB_KEY)}catch(e){console.error('Supab
 let me=null,myProf=null,view='home',viewProf=null,viewPostId=null,replyOverride=null;
 let likedSet=new Set(),bmSet=new Set();
 let activeConvo=null;
+
+/* ===== SCHEMA CACHE FIX ===== */
+async function reloadSchema(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    await new Promise(res=>setTimeout(res,2000));
+  }catch(e){}
+}
 
 /* ===== ANTI-RECORDING ===== */
 (function(){
@@ -139,7 +144,7 @@ function closeModal(){document.getElementById('cmpModal').classList.remove('show
 function updCmpBtn(){const b=document.getElementById('cmpBtn'),t=document.getElementById('cmpText');if(!b||!t)return;const ok=t.value.trim().length>0;b.disabled=!ok;b.style.opacity=ok?'1':'.5';b.style.cursor=ok?'pointer':'default'}
 async function doPost(){const txt=document.getElementById('cmpText').value.trim();if(!txt)return;const b=document.getElementById('cmpBtn');b.disabled=true;b.innerHTML='<div class="spin" style="margin:auto;border-top-color:#0f172a"></div>';const ins={user_id:me.id,content:txt,like_count:0,repost_count:0,reply_count:0,bookmark_count:0};if(replyOverride)ins.reply_to=replyOverride;const{error}=await sb.from('posts').insert(ins);if(error){toast('Post failed: '+error.message,'error');b.disabled=false;b.textContent='Post';return}closeModal();toast(replyOverride?'Reply sent!':'Post sent!','success');await loadFeed()}
 
-async function getLikedAndBm(){if(!me)return;const[l,b]=await Promise.all([sb.from('likes').select('post_id').eq('user_id',me.id),sb.from('bookmarks').select('post_id').eq('user_id',me.id)]);likedSet=new Set((l.data||[]).map(x=>x.post_id));bmSet=new Set((b.data||[]).map(x=>x.post_id))}
+async function getLikedAndBm(){if(!me)return;try{const[l,b]=await Promise.all([sb.from('likes').select('post_id').eq('user_id',me.id),sb.from('bookmarks').select('post_id').eq('user_id',me.id)]);likedSet=new Set((l.data||[]).map(x=>x.post_id));bmSet=new Set((b.data||[]).map(x=>x.post_id))}catch(e){}}
 
 async function loadFeed(){
   const fc=document.getElementById('feedCont');if(!fc)return;
@@ -148,24 +153,33 @@ async function loadFeed(){
   let posts=[];
   try{
     if(view==='home'){
-      // Fetch ALL recent posts so you can see your own posts immediately
-      const{data:p,error}=await sb.from('posts').select('*,profiles(username,display_name,avatar_url)').is('reply_to',null).order('created_at',{ascending:false}).limit(50);
+      // FIX: Added !profiles hint to fix "more than one relationship" error
+      const{data:p,error}=await sb.from('posts').select('*, profiles!posts_user_id_fkey(username, display_name, avatar_url)').is('reply_to',null).order('created_at',{ascending:false}).limit(50);
       if(error)throw error;posts=p||[];
     }else if(view==='explore'){
-      const{data:p,error}=await sb.from('posts').select('*,profiles(username,display_name,avatar_url)').is('reply_to',null).order('like_count',{ascending:false}).limit(50);
+      const{data:p,error}=await sb.from('posts').select('*, profiles!posts_user_id_fkey(username, display_name, avatar_url)').is('reply_to',null).order('like_count',{ascending:false}).limit(50);
       if(error)throw error;posts=p||[];
     }else if(view==='profile'&&viewProf){
-      const{data:p,error}=await sb.from('posts').select('*,profiles(username,display_name,avatar_url)').eq('user_id',viewProf).is('reply_to',null).order('created_at',{ascending:false}).limit(50);
+      const{data:p,error}=await sb.from('posts').select('*, profiles!posts_user_id_fkey(username, display_name, avatar_url)').eq('user_id',viewProf).is('reply_to',null).order('created_at',{ascending:false}).limit(50);
       if(error)throw error;posts=p||[];
     }else if(view==='bookmarks'){
       const{data:bm}=await sb.from('bookmarks').select('post_id').eq('user_id',me.id);const pids=(bm||[]).map(x=>x.post_id);
       if(pids.length===0){fc.innerHTML='<div style="padding:60px;text-align:center;color:#64748b"><i class="far fa-bookmark" style="font-size:48px;margin-bottom:16px;display:block"></i><p style="font-size:20px;font-weight:700;color:#f1f5f9">No bookmarks yet</p></div>';return}
-      const{data:p,error}=await sb.from('posts').select('*,profiles(username,display_name,avatar_url)').in('id',pids).order('created_at',{ascending:false});
+      const{data:p,error}=await sb.from('posts').select('*, profiles!posts_user_id_fkey(username, display_name, avatar_url)').in('id',pids).order('created_at',{ascending:false});
       if(error)throw error;posts=p||[];
     }
     if(posts.length===0){fc.innerHTML='<div style="padding:60px;text-align:center;color:#64748b"><i class="fas fa-feather" style="font-size:48px;margin-bottom:16px;display:block"></i><p style="font-size:20px;font-weight:700;color:#f1f5f9">No posts yet</p><p>Be the first to post!</p></div>';return}
     fc.innerHTML=posts.map(p=>postHTML(p)).join('');
-  }catch(e){toast("Feed error: "+e.message,"error");fc.innerHTML='<div style="padding:40px;text-align:center;color:#ef4444">Error loading feed. Check if required tables exist.</div>'}
+  }catch(e){
+    toast("Feed error: "+e.message,"error");
+    // If schema cache error, try reloading
+    if(e.message.includes('schema cache')||e.message.includes('relationship')){
+      toast('Refreshing database cache...','info');
+      await reloadSchema();
+      setTimeout(()=>loadFeed(),3000);
+    }
+    fc.innerHTML='<div style="padding:40px;text-align:center;color:#ef4444">Error loading feed. Retrying...</div>';
+  }
 }
 
 function postHTML(p,detail=false){
@@ -188,7 +202,6 @@ async function doLike(pid,el,was){if(!me)return;const sp=el.querySelector('span'
 async function doRT(pid,el){if(!me)return;const sp=el.querySelector('span');let c=parseInt(sp.textContent)||0;if(el.classList.contains('on'))return;await sb.from('posts').update({repost_count:c+1}).eq('id',pid);el.classList.add('on');sp.textContent=c+1;toast('Reposted','success')}
 async function doBm(pid,el,was){if(!me)return;const ic=el.querySelector('i');if(was){await sb.from('bookmarks').delete().eq('user_id',me.id).eq('post_id',pid);el.classList.remove('on');ic.className='far fa-bookmark'}else{await sb.from('bookmarks').insert({user_id:me.id,post_id:pid});el.classList.add('on');ic.className='fas fa-bookmark';toast('Bookmarked','success')}}
 function doReply(pid,uname){openModal();document.getElementById('cmpText').value='@'+uname+' ';replyOverride=pid;updCmpBtn()}
-async function delPost(pid){await sb.from('likes').delete().eq('post_id',pid);await sb.from('bookmarks').delete().eq('post_id',pid);await sb.from('posts').delete().eq('id',pid);toast('Post deleted','info');loadFeed()}
 
 /* ===== MESSAGING & GROUPS ===== */
 async function loadConvos(){
@@ -215,7 +228,15 @@ async function loadConvos(){
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px;display:flex;justify-content:space-between"><span>${esc(name)}</span>${c.is_group?'<i class="fas fa-users" style="color:#64748b;font-size:11px"></i>':''}</div><div style="color:#64748b;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(lastMsg)}</div></div></div>`;
     }
     cl.innerHTML=h;
-  }catch(e){toast("Messages error: "+e.message,"error");cl.innerHTML='<div style="padding:20px;color:#ef4444;font-size:13px">Error loading chats. Do the tables exist?</div>'}
+  }catch(e){
+    toast("Messages error: "+e.message,"error");
+    if(e.message.includes('schema cache')||e.message.includes('relation')){
+      toast('Refreshing database cache...','info');
+      await reloadSchema();
+      setTimeout(()=>loadConvos(),3000);
+    }
+    cl.innerHTML='<div style="padding:20px;color:#ef4444;font-size:13px">Error loading chats. Retrying...</div>';
+  }
 }
 
 async function openConvo(cid){
@@ -238,7 +259,7 @@ async function openConvo(cid){
 async function loadMessages(cid){
   const mc=document.getElementById('msgCont');if(!mc)return;
   mc.innerHTML='<div style="padding:40px;display:flex;justify-content:center"><div class="spin" style="width:32px;height:32px"></div></div>';
-  const{data:m,error}=await sb.from('messages').select('*, profiles(username, display_name, avatar_url)').eq('conversation_id',cid).order('created_at',{ascending:true}).limit(100);
+  const{data:m,error}=await sb.from('messages').select('*, profiles!messages_sender_id_fkey(username, display_name, avatar_url)').eq('conversation_id',cid).order('created_at',{ascending:true}).limit(100);
   if(error){toast("Msg error: "+error.message,"error");return}
   let h='';(m||[]).forEach(msg=>{
     const isMine=msg.sender_id===me.id;
@@ -287,11 +308,10 @@ function goPost(pid){view='thread';viewPostId=pid;render()}
 /* ===== RENDER ===== */
 function render(){const app=document.getElementById('mainApp');if(!me){renderAuth(app)}else{renderMain(app)}}
 
-function renderAuth(app){app.innerHTML=`<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:radial-gradient(circle at top, #1e293b 0%, #0f172a 60%)"><div style="width:440px;max-width:100%;padding:40px;background:#1e293b;border:1px solid #334155;border-radius:24px;box-shadow:0 24px 48px rgba(0,0,0,0.5)"><div style="text-align:center;margin-bottom:32px"><div style="width:56px;height:56px;background:#38bdf8;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px;font-weight:900;color:#0f172a">NM</div><h1 style="font-size:28px;font-weight:900">Nafiz Meet</h1><p style="color:#94a3b8;font-size:14px;margin-top:4px">Social, Chat & Calls</p></div><div id="authTabs" style="display:flex;background:#0f172a;border-radius:12px;padding:4px;margin-bottom:24px"><div id="tabLogin" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;color:#0f172a;background:#38bdf8;border-radius:10px;transition:all .2s" onclick="showAuthTab('login')">Sign In</div><div id="tabSignup" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:500;color:#94a3b8;border-radius:10px;transition:all .2s" onclick="showAuthTab('signup')">Sign Up</div></div><div id="loginForm"><div style="display:flex;flex-direction:column;gap:12px"><input id="lEmail" class="auth-input" type="email" placeholder="Email"><input id="lPass" class="auth-input" type="password" placeholder="Password"><button onclick="doSignIn()" style="width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;background:#38bdf8;color:#0f172a;transition:opacity .2s">Sign In</button></div></div><div id="signupForm" style="display:none"><div style="display:flex;flex-direction:column;gap:12px"><input id="sDisp" class="auth-input" placeholder="Display Name"><input id="sUser" class="auth-input" placeholder="Username"><input id="sEmail" class="auth-input" type="email" placeholder="Email"><input id="sPass" class="auth-input" type="password" placeholder="Password (6+ chars)"><button onclick="doSignUp()" style="width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;background:#38bdf8;color:#0f172a">Create Account</button></div></div><div style="text-align:center;margin-top:24px;font-size:11px;color:#64748b">Powered by <a href="https://mmjplaysyt.work.gd/" target="_blank" rel="noopener" style="color:#38bdf0">MMJpages</a> · &copy; ${new Date().getFullYear()}</div></div></div>`;app.querySelectorAll('.auth-input').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter'){if(document.getElementById('loginForm').style.display!=='none')doSignIn();else doSignUp()}}))}
+function renderAuth(app){app.innerHTML=`<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:radial-gradient(circle at top, #1e293b 0%, #0f172a 60%)"><div style="width:440px;max-width:100%;padding:40px;background:#1e293b;border:1px solid #334155;border-radius:24px;box-shadow:0 24px 48px rgba(0,0,0,0.5)"><div style="text-align:center;margin-bottom:32px"><div style="width:56px;height:56px;background:#38bdf8;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px;font-weight:900;color:#0f172a">NM</div><h1 style="font-size:28px;font-weight:900">Nafiz Meet</h1><p style="color:#94a3b8;font-size:14px;margin-top:4px">Social, Chat & Calls</p></div><div id="authTabs" style="display:flex;background:#0f172a;border-radius:12px;padding:4px;margin-bottom:24px"><div id="tabLogin" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:600;color:#0f172a;background:#38bdf8;border-radius:10px;transition:all .2s" onclick="showAuthTab('login')">Sign In</div><div id="tabSignup" style="flex:1;text-align:center;padding:10px;cursor:pointer;font-weight:500;color:#94a3b8;border-radius:10px;transition:all .2s" onclick="showAuthTab('signup')">Sign Up</div></div><div id="loginForm"><div style="display:flex;flex-direction:column;gap:12px"><input id="lEmail" class="auth-input" type="email" placeholder="Email"><input id="lPass" class="auth-input" type="password" placeholder="Password"><button onclick="doSignIn()" style="width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;background:#38bdf8;color:#0f172a">Sign In</button></div></div><div id="signupForm" style="display:none"><div style="display:flex;flex-direction:column;gap:12px"><input id="sDisp" class="auth-input" placeholder="Display Name"><input id="sUser" class="auth-input" placeholder="Username"><input id="sEmail" class="auth-input" type="email" placeholder="Email"><input id="sPass" class="auth-input" type="password" placeholder="Password (6+ chars)"><button onclick="doSignUp()" style="width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;background:#38bdf8;color:#0f172a">Create Account</button></div></div><div style="text-align:center;margin-top:24px;font-size:11px;color:#64748b">Powered by <a href="https://mmjplaysyt.work.gd/" target="_blank" rel="noopener" style="color:#38bdf8">MMJpages</a> · &copy; ${new Date().getFullYear()}</div></div></div>`;app.querySelectorAll('.auth-input').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter'){if(document.getElementById('loginForm').style.display!=='none')doSignIn();else doSignUp()}}))}
 function showAuthTab(tab){const lf=document.getElementById('loginForm'),sf=document.getElementById('signupForm'),tl=document.getElementById('tabLogin'),ts=document.getElementById('tabSignup');if(tab==='login'){lf.style.display='block';sf.style.display='none';tl.style.background='#38bdf8';tl.style.color='#0f172a';ts.style.background='transparent';ts.style.color='#94a3b8'}else{lf.style.display='none';sf.style.display='block';ts.style.background='#38bdf8';ts.style.color='#0f172a';tl.style.background='transparent';tl.style.color='#94a3b8'}}
 
 async function renderMain(app){
-  const myAv=myProf?.avatar_url||'https://picsum.photos/seed/'+(me?.id||'x')+'/100/100.jpg';
   app.innerHTML=`
 <div style="display:flex;height:100vh;padding-bottom:28px">
 <nav style="width:240px;flex-shrink:0;padding:16px 12px;display:flex;flex-direction:column;border-right:1px solid #334155">
@@ -365,13 +385,15 @@ async function renderProfileHeader(){
   const{count:fwc}=await sb.from('follows').select('*',{count:'exact',head:true}).eq('follower_id',viewProf);
   const{data:isF}=await sb.from('follows').select('*').eq('follower_id',me.id).eq('following_id',viewProf).maybeSingle();
   const av=prof.avatar_url||'https://picsum.photos/seed/'+prof.id+'/100/100.jpg',own=viewProf===me.id;
-  c.innerHTML=`<div style="height:160px;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);position:relative"><div style="position:absolute;bottom:-40px;left:20px"><img src="${av}" style="width:100px;height:100px;border-radius:20px;border:4px solid #0f172a;object-fit:cover" onerror="this.src='https://picsum.photos/seed/${prof.id}/100/100.jpg'"></div></div><div style="padding:50px 20px 16px;display:flex;justify-content:space-between;align-items:flex-start"><div><h2 style="font-size:22px;font-weight:800">${esc(prof.display_name)}</h2><span style="color:#64748b">@${esc(prof.username)}</span></div><div style="display:flex;gap:8px">${own?`<button onclick="toast('Edit profile coming soon','info')" style="padding:8px 20px;border-radius:10px;border:1px solid #334155;background:transparent;color:#f1f5f9;font-weight:600;cursor:pointer">Edit profile</button>`:`<button class="fl-btn ${isF?'fg':'nf'}" onclick="doFollow('${prof.id}',this)">${isF?'Following':'Follow'}</button><button onclick="startDM('${prof.id}')" style="padding:8px 16px;border-radius:10px;border:1px solid #334155;background:transparent;color:#f1f5f9;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><i class="fas fa-comment-dots"></i> Message</button>`}</div></div>${prof.bio?`<p style="padding:0 20px 16px;font-size:14px">${esc(prof.bio)}</p>`:''}<div style="display:flex;gap:20px;padding:0 20px 16px;font-size:14px"><span><strong>${fwc||0}</strong> <span style="color:#64748b">Following</span></span><span><strong>${fc||0}</strong> <span style="color:#64748b">Followers</span></span></div>`;
+  c.innerHTML=`<div style="height:160px;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);position:relative"><div style="position:absolute;bottom:-40px;left:20px"><img src="${av}" style="width:100px;height:100px;border-radius:20px;border:4px solid #0f172a;object-fit:cover" onerror="this.src='https://picsum.photos/seed/${prof.id}/100/100.jpg'"></div></div><div style="padding:50px 20px 16px;display:flex;justify-content:space-between;align-items:flex-start"><div><h2 style="font-size:22px;font-weight:800">${esc(prof.display_name)}</h2><span style="color:#64748b">@${esc(prof.username)}</span></div><div style="display:flex;gap:8px">${own?`<button onclick="toast('Edit profile coming soon','info')" style="padding:8px 20px;border-radius:10px;border:1px solid #334155;background:transparent;color:#f1f5f9;font-weight:600;cursor:pointer">Edit profile</button>`:`<button style="padding:8px 16px;border-radius:10px;border:1px solid #334155;background:transparent;color:#f1f5f9;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px" onclick="startDM('${prof.id}')"><i class="fas fa-comment-dots"></i> Message</button>`}</div></div>${prof.bio?`<p style="padding:0 20px 16px;font-size:14px">${esc(prof.bio)}</p>`:''}<div style="display:flex;gap:20px;padding:0 20px 16px;font-size:14px"><span><strong>${fwc||0}</strong> <span style="color:#64748b">Following</span></span><span><strong>${fc||0}</strong> <span style="color:#64748b">Followers</span></span></div>`;
 }
 
 function updInline(){const b=document.getElementById('inlineBtn'),t=document.getElementById('inlineCmp');if(!b||!t)return;const ok=t.value.trim().length>0;b.disabled=!ok;b.style.opacity=ok?'1':'.5';b.style.cursor=ok?'pointer':'default'}
 async function doInlinePost(){const t=document.getElementById('inlineCmp');if(!t)return;const c=t.value.trim();if(!c)return;const b=document.getElementById('inlineBtn');b.disabled=true;b.innerHTML='<div class="spin" style="margin:auto;border-top-color:#0f172a"></div>';const{error}=await sb.from('posts').insert({user_id:me.id,content:c,like_count:0,repost_count:0,reply_count:0,bookmark_count:0});if(error){toast("Post failed: "+error.message,"error");b.disabled=false;b.textContent='Post';return}t.value='';updInline();toast('Post sent!','success');await loadFeed()}
 
-async function loadWTF(){const c=document.getElementById('wtfBox');if(!c)return;const{data:fw}=await sb.from('follows').select('following_id').eq('follower_id',me.id);const ids=fw?fw.map(f=>f.following_id):[];ids.push(me.id);const{data:pros}=await sb.from('profiles').select('*').not('id','in',`(${ids.join(',')})`).limit(3);let h='<h3 style="font-size:16px;font-weight:700;padding:14px 16px">Suggested Users</h3>';if(!pros||!pros.length){h+='<p style="padding:14px 16px;color:#64748b;font-size:13px">No suggestions</p>';c.innerHTML=h;return}pros.forEach(p=>{const av=p.avatar_url||'https://picsum.photos/seed/'+p.id+'/100/100.jpg';h+=`<div style="display:flex;align-items:center;padding:10px 16px;gap:10px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='rgba(56,189,248,0.05)'" onmouseout="this.style.background='none'" onclick="goProf('${p.id}')"><img src="${av}" style="width:36px;height:36px;border-radius:10px;object-fit:cover" onerror="this.src='https://picsum.photos/seed/${p.id}/100/100.jpg'"><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">${esc(p.display_name)}</div><div style="color:#64748b;font-size:12px">@${esc(p.username)}</div></div><button style="padding:6px 14px;border-radius:8px;background:#38bdf8;color:#0f172a;border:none;font-weight:600;font-size:12px;cursor:pointer" onclick="event.stopPropagation();doFollow('${p.id}',this)">Follow</button></div>`});c.innerHTML=h}
+async function loadWTF(){const c=document.getElementById('wtfBox');if(!c)return;try{const{data:fw}=await sb.from('follows').select('following_id').eq('follower_id',me.id);const ids=fw?fw.map(f=>f.following_id):[];ids.push(me.id);const{data:pros}=await sb.from('profiles').select('*').not('id','in',`(${ids.join(',')})`).limit(3);let h='<h3 style="font-size:16px;font-weight:700;padding:14px 16px">Suggested Users</h3>';if(!pros||!pros.length){h+='<p style="padding:14px 16px;color:#64748b;font-size:13px">No suggestions</p>';c.innerHTML=h;return}pros.forEach(p=>{const av=p.avatar_url||'https://picsum.photos/seed/'+p.id+'/100/100.jpg';h+=`<div style="display:flex;align-items:center;padding:10px 16px;gap:10px;cursor:pointer" onclick="goProf('${p.id}')"><img src="${av}" style="width:36px;height:36px;border-radius:10px;object-fit:cover" onerror="this.src='https://picsum.photos/seed/${p.id}/100/100.jpg'"><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">${esc(p.display_name)}</div><div style="color:#64748b;font-size:12px">@${esc(p.username)}</div></div><button style="padding:6px 14px;border-radius:8px;background:#38bdf8;color:#0f172a;border:none;font-weight:600;font-size:12px;cursor:pointer" onclick="event.stopPropagation();doFollow('${p.id}',this)">Follow</button></div>`});c.innerHTML=h}catch(e){}}
+
+async function doFollow(uid,btn){if(!me||uid===me.id)return;const{data:existing}=await sb.from('follows').select('*').eq('follower_id',me.id).eq('following_id',uid).maybeSingle();if(existing){await sb.from('follows').delete().eq('follower_id',me.id).eq('following_id',uid);btn.style.background='#38bdf8';btn.style.color='#0f172a';btn.textContent='Follow'}else{await sb.from('follows').insert({follower_id:me.id,following_id:uid});btn.style.background='transparent';btn.style.color='#38bdf8';btn.style.border='1px solid #38bdf8';btn.textContent='Following'}loadWTF()}
 
 function setupRealtime(){if(!sb)return;sb.channel('nm-rt').on('postgres_changes',{event:'INSERT',schema:'public',table:'posts'},p=>{if(view==='home'&&p.new&&p.new.user_id!==me.id){const fc=document.getElementById('feedCont');if(fc&&!fc.querySelector('.new-bar')){const bar=document.createElement('div');bar.className='new-bar';bar.style.cssText='background:rgba(56,189,248,0.1);color:#38bdf8;text-align:center;padding:10px;font-size:14px;font-weight:600;cursor:pointer;border-bottom:1px solid #334155';bar.textContent='See new posts';bar.onclick=()=>{bar.remove();loadFeed()};fc.prepend(bar)}}}).on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},p=>{if(p.new&&p.new.conversation_id===activeConvo){loadMessages(activeConvo)}}).subscribe()}
 

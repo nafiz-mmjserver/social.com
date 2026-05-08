@@ -18,7 +18,7 @@ body{background:#000;color:#e7e9ea;font-family:'Noto Sans',sans-serif;margin:0;o
 input,textarea{font-family:inherit}
 a{text-decoration:none;color:inherit}
 
-/* Anti-recording */
+/* Anti-recording - Only active when a real recording is detected */
 body.is-recording #mainApp{filter:blur(30px);pointer-events:none;transition:filter 0.3s}
 .recording-warning{display:none;position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.97);align-items:center;justify-content:center;flex-direction:column;gap:16px;color:#f4212e;font-size:28px;font-weight:700;text-align:center}
 body.is-recording .recording-warning{display:flex}
@@ -105,11 +105,11 @@ body.is-recording .recording-warning{display:flex}
 </head>
 <body>
 
-<!-- Recording Warning -->
+<!-- Recording Warning (Only shows if an actual recording is actively hijacked/blocked) -->
 <div class="recording-warning" id="recWarn">
 <i class="fas fa-shield-halved"></i>
-<span>Recording Detected</span>
-<p>Screen recording and voice recording are blocked on this platform for security purposes.</p>
+<span>Recording Blocked</span>
+<p>Screen recording and voice recording are strictly prohibited on Nafiz Meet for security purposes.</p>
 </div>
 
 <!-- Toasts -->
@@ -153,36 +153,41 @@ try{sb=window.supabase.createClient(SB_URL,SB_KEY)}catch(e){console.error('Supab
 let me=null,myProf=null,view='home',viewProf=null,viewPostId=null,replyOverride=null;
 let likedSet=new Set(),bmSet=new Set();
 
-/* ========== ANTI-RECORDING ========== */
+/* ========== ANTI-RECORDING (FIXED - NO FALSE POSITIVES) ========== */
 (function(){
-  // Block screen capture
+  // SILENTLY BLOCK screen capture APIs
   if(navigator.mediaDevices){
     if(navigator.mediaDevices.getDisplayMedia){
-      const og=navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
-      navigator.mediaDevices.getDisplayMedia=function(){showRecWarn();return Promise.reject(new Error('Blocked'))};
+      navigator.mediaDevices.getDisplayMedia=function(){
+        showRecWarn(); // Show warning ONLY when something tries to record
+        return Promise.reject(new Error('Screen recording is blocked by Nafiz Meet security policy.'));
+      };
     }
-    // Block audio recording
+    // SILENTLY BLOCK audio/microphone recording APIs
     if(navigator.mediaDevices.getUserMedia){
       const og2=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
       navigator.mediaDevices.getUserMedia=function(c){
-        if(c&&c.audio){showRecWarn();return Promise.reject(new Error('Audio recording blocked'))}
+        if(c&&c.audio){
+          showRecWarn(); // Show warning ONLY when something tries to record
+          return Promise.reject(new Error('Audio recording is blocked by Nafiz Meet security policy.'));
+        }
         return og2(c);
       };
     }
   }
-  // Keyboard shortcuts
+  
+  // Block keyboard screenshot shortcuts
   document.addEventListener('keydown',function(e){
     if(e.key==='PrintScreen'){e.preventDefault();showRecWarn()}
     if((e.ctrlKey||e.metaKey)&&e.shiftKey&&'345'.includes(e.key)){e.preventDefault();showRecWarn()}
   });
-  // Block context menu, copy, drag
+  
+  // Disable right-click, copy, drag to prevent content theft
   document.addEventListener('contextmenu',e=>e.preventDefault());
   document.addEventListener('copy',e=>e.preventDefault());
   document.addEventListener('dragstart',e=>e.preventDefault());
-  // Periodic screen capture check
-  setInterval(async()=>{
-    try{const s=await navigator.mediaDevices.getDisplayMedia({video:true});s.getTracks().forEach(t=>t.stop());showRecWarn()}catch(e){}
-  },5000);
+  
+  // NOTE: Removed the periodic getDisplayMedia check that was causing the false alarm!
 })();
 
 let recTimeout=null;
@@ -207,7 +212,6 @@ async function doSignUp(){
   if(!em||!pw||!un||!dn){toast('All fields required','error');return}
   if(un.length<3){toast('Username min 3 chars','error');return}
   if(pw.length<6){toast('Password min 6 chars','error');return}
-  // Check username
   const{data:ex}=await sb.from('profiles').select('username').eq('username',un).maybeSingle();
   if(ex){toast('Username taken','error');return}
   const{data,error}=await sb.auth.signUp({email:em,password:pw});
@@ -494,7 +498,6 @@ function renderAuth(app){
 </div>
 </div>
 </div>`;
-  // Enter key
   app.querySelectorAll('.auth-input').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter'){if(document.getElementById('loginForm').style.display!=='none')doSignIn();else doSignUp()}}));
 }
 
@@ -596,7 +599,6 @@ async function renderMain(app){
 <span>Powered by <a href="https://mmjplaysyt.work.gd/" target="_blank" rel="noopener">MMJpages</a></span>
 </div>`;
 
-  // Render header + profile based on view
   renderHeader();
   if(isProf)renderProfileHeader();
   loadFeed();
@@ -732,7 +734,6 @@ async function init(){
       else if(event==='SIGNED_OUT'){me=null;myProf=null;render()}
     });
   }catch(e){}
-  // Close dropdowns on outside click
   document.addEventListener('click',e=>{
     document.querySelectorAll('.dd-menu').forEach(m=>{if(!m.parentElement.contains(e.target))m.style.display='none'});
   });
